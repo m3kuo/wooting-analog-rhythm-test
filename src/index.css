@@ -8,35 +8,52 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 220 15% 8%;
+    --foreground: 210 40% 98%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 220 15% 10%;
+    --card-foreground: 210 40% 98%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 220 15% 10%;
+    --popover-foreground: 210 40% 98%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 270 80% 65%;
+    --primary-foreground: 220 15% 8%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 220 15% 15%;
+    --secondary-foreground: 210 40% 98%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 220 15% 15%;
+    --muted-foreground: 215 20% 65%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 270 80% 65%;
+    --accent-foreground: 220 15% 8%;
 
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 75% 60%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 220 15% 20%;
+    --input: 220 15% 15%;
+    --ring: 270 80% 65%;
 
-    --radius: 0.5rem;
+    --success: 140 70% 50%;
+    --warning: 40 95% 60%;
+    --analog-low: 140 70% 50%;
+    --analog-mid: 40 95% 60%;
+    --analog-high: 0 75% 60%;
+
+    --keyboard-bg: 220 15% 12%;
+    --key-idle: 220 15% 18%;
+    --key-target: 270 80% 65%;
+    --key-pressed: 140 70% 50%;
+    --key-error: 0 75% 60%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(270 80% 65%), hsl(270 70% 75%));
+    --gradient-accent: linear-gradient(180deg, hsl(220 15% 12%), hsl(220 15% 8%));
+    --shadow-glow: 0 0 30px hsl(270 80% 65% / 0.3);
+    --shadow-key: 0 4px 12px hsl(220 15% 5% / 0.8);
+
+    --radius: 0.75rem;
 
     --sidebar-background: 0 0% 98%;
 
