@@ -35,19 +35,20 @@ const PRESSURE_LEVELS = [30, 60, 100];
 export const AnalogTypingTest = () => {
   const { keyData, connectionStatus, connect, disconnect } = useWebSocket();
   const { toast } = useToast();
-  
+
   const [testSequence, setTestSequence] = useState<TestSequence[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isTestActive, setIsTestActive] = useState(false);
+  const [holdStartTime, setHoldStartTime] = useState<number | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+
   const [testStats, setTestStats] = useState<TestStats>({
     accuracy: 0,
     totalAttempts: 0,
     successfulHits: 0,
     averageDeviation: 0
   });
-  const [attempts, setAttempts] = useState<number[]>([]);
 
-  // Generate a random test sequence
   const generateTestSequence = useCallback(() => {
     const sequence: TestSequence[] = [];
     for (let i = 0; i < 20; i++) {
@@ -63,63 +64,83 @@ export const AnalogTypingTest = () => {
     setCurrentIndex(0);
   }, []);
 
-  // Initialize test sequence on mount
   useEffect(() => {
     generateTestSequence();
   }, [generateTestSequence]);
 
-  // Handle key press detection
   useEffect(() => {
     if (!isTestActive || currentIndex >= testSequence.length) return;
 
+    if (cooldownUntil && Date.now() < cooldownUntil) return;
+
     const currentTarget = testSequence[currentIndex];
-    const keyPress = keyData.find(k => k.keyCode === currentTarget.keyCode && k.isPressed === 1);
+    const correctKeyPress = keyData.find(k => k.keyCode === currentTarget.keyCode && k.isPressed === 1);
+    const wrongKeyPress = keyData.find(k => k.keyCode !== currentTarget.keyCode && k.isPressed === 1);
 
-    if (keyPress) {
-      const pressurePercent = keyPress.analogValue * 100;
-      const targetPercent = currentTarget.targetPressure;
-      const deviation = Math.abs(pressurePercent - targetPercent);
-      const tolerance = 10; // 10% tolerance
+    const tolerance = 10;
 
-      setAttempts(prev => [...prev, deviation]);
-      
-      const isSuccess = deviation <= tolerance;
-      
-      setTestStats(prev => {
-        const newTotalAttempts = prev.totalAttempts + 1;
-        const newSuccessfulHits = prev.successfulHits + (isSuccess ? 1 : 0);
-        const newAccuracy = (newSuccessfulHits / newTotalAttempts) * 100;
-        const newAverageDeviation = (prev.averageDeviation * prev.totalAttempts + deviation) / newTotalAttempts;
-
-        return {
-          accuracy: newAccuracy,
-          totalAttempts: newTotalAttempts,
-          successfulHits: newSuccessfulHits,
-          averageDeviation: newAverageDeviation
-        };
-      });
-
-      if (isSuccess) {
-        toast({
-          title: "Perfect!",
-          description: `Hit ${targetPercent}% with ${Math.round(pressurePercent)}% pressure`,
-        });
-      } else {
-        toast({
-          title: "Miss",
-          description: `Target: ${targetPercent}%, You: ${Math.round(pressurePercent)}%`,
-          variant: "destructive"
-        });
-      }
-
-      // Move to next key after a short delay
-      setTimeout(() => {
-        setCurrentIndex(prev => prev + 1);
-      }, 500);
+    if (wrongKeyPress) {
+      handleAttempt(100, false, "Wrong key!");
+      return;
     }
-  }, [keyData, isTestActive, currentIndex, testSequence, toast]);
 
-  // Auto-end test when sequence is complete
+    if (correctKeyPress) {
+      const pressurePercent = correctKeyPress.analogValue * 100;
+      const deviation = Math.abs(pressurePercent - currentTarget.targetPressure);
+
+      const withinRange = deviation <= tolerance;
+      const now = Date.now();
+
+      if (withinRange) {
+        if (!holdStartTime) {
+          setHoldStartTime(now);
+        } else if (now - holdStartTime >= 750) { // give more time here
+          handleAttempt(deviation, true, "Perfect!");
+        }
+      } else {
+        if (!holdStartTime) {
+          setHoldStartTime(now);
+        } else if (now - holdStartTime >= 750) {
+          handleAttempt(deviation, false, "Wrong pressure!");
+        }
+      }
+    } else {
+      setHoldStartTime(null);
+    }
+  }, [keyData, isTestActive, currentIndex, testSequence, holdStartTime, cooldownUntil]);
+
+  const handleAttempt = (deviation: number, isSuccess: boolean, message: string) => {
+    setTestStats(prev => {
+      const newTotalAttempts = prev.totalAttempts + 1;
+      const newSuccessfulHits = prev.successfulHits + (isSuccess ? 1 : 0);
+      const newAccuracy = (newSuccessfulHits / newTotalAttempts) * 100;
+      const newAverageDeviation = (prev.averageDeviation * prev.totalAttempts + deviation) / newTotalAttempts;
+
+      return {
+        accuracy: newAccuracy,
+        totalAttempts: newTotalAttempts,
+        successfulHits: newSuccessfulHits,
+        averageDeviation: newAverageDeviation
+      };
+    });
+
+    toast({
+      title: message,
+      description: isSuccess
+        ? `Held correct pressure`
+        : `Deviation: ${Math.round(deviation)}%`,
+      variant: isSuccess ? undefined : "destructive"
+    });
+
+    setHoldStartTime(null);
+    setCooldownUntil(Date.now() + 3000);
+
+    setTimeout(() => {
+      setCurrentIndex(prev => prev + 1);
+      setCooldownUntil(null);
+    }, 3000);
+  };
+
   useEffect(() => {
     if (currentIndex >= testSequence.length && isTestActive) {
       setIsTestActive(false);
@@ -155,17 +176,13 @@ export const AnalogTypingTest = () => {
       successfulHits: 0,
       averageDeviation: 0
     });
-    setAttempts([]);
+    setHoldStartTime(null);
+    setCooldownUntil(null);
     generateTestSequence();
   };
 
   const getCurrentKeyPress = (keyCode: number): KeyData | undefined => {
     return keyData.find(k => k.keyCode === keyCode);
-  };
-
-  const isCurrentTarget = (keyCode: number): boolean => {
-    return isTestActive && currentIndex < testSequence.length && 
-           testSequence[currentIndex].keyCode === keyCode;
   };
 
   const getConnectionIcon = () => {
@@ -182,17 +199,15 @@ export const AnalogTypingTest = () => {
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header */}
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold bg-gradient-primary bg-clip-text text-transparent">
             Wooting Analog Precision Test
           </h1>
           <p className="text-muted-foreground">
-            Test your analog keyboard control by hitting precise pressure values
+            Test your keyboard control by hitting and holding precise pressure values
           </p>
         </div>
 
-        {/* Connection Status */}
         <Card className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -216,39 +231,6 @@ export const AnalogTypingTest = () => {
           </div>
         </Card>
 
-        {/* Test Controls */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex gap-2">
-              {!isTestActive ? (
-                <Button onClick={startTest} className="flex items-center gap-2">
-                  <Play className="w-4 h-4" />
-                  Start Test
-                </Button>
-              ) : (
-                <Button onClick={pauseTest} variant="secondary" className="flex items-center gap-2">
-                  <Pause className="w-4 h-4" />
-                  Pause
-                </Button>
-              )}
-              <Button onClick={resetTest} variant="outline" className="flex items-center gap-2">
-                <RotateCcw className="w-4 h-4" />
-                Reset
-              </Button>
-            </div>
-            
-            <div className="text-sm text-muted-foreground">
-              Progress: {currentIndex} / {testSequence.length}
-            </div>
-          </div>
-
-          <Progress 
-            value={(currentIndex / testSequence.length) * 100} 
-            className="h-2"
-          />
-        </Card>
-
-        {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card className="p-4 text-center">
             <div className="text-2xl font-bold text-primary">
@@ -276,60 +258,65 @@ export const AnalogTypingTest = () => {
           </Card>
         </div>
 
-        {/* Current Target */}
-        {isTestActive && currentIndex < testSequence.length && (
-          <Card className="p-6 text-center">
-            <div className="text-lg text-muted-foreground mb-2">Press this key:</div>
-            <div className="flex justify-center">
-              <KeyboardKey
-                keyChar={testSequence[currentIndex].key}
-                targetPressure={testSequence[currentIndex].targetPressure}
-                currentPressure={getCurrentKeyPress(testSequence[currentIndex].keyCode)?.analogValue || 0}
-                isPressed={getCurrentKeyPress(testSequence[currentIndex].keyCode)?.isPressed === 1}
-                isTarget={true}
-                className="w-20 h-20 text-3xl"
-              />
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex gap-2">
+              {!isTestActive ? (
+                <Button onClick={startTest} className="flex items-center gap-2">
+                  <Play className="w-4 h-4" />
+                  Start Test
+                </Button>
+              ) : (
+                <Button onClick={pauseTest} variant="secondary" className="flex items-center gap-2">
+                  <Pause className="w-4 h-4" />
+                  Pause
+                </Button>
+              )}
+              <Button onClick={resetTest} variant="outline" className="flex items-center gap-2">
+                <RotateCcw className="w-4 h-4" />
+                Reset
+              </Button>
             </div>
+            <div className="text-sm text-muted-foreground">
+              Progress: {currentIndex} / {testSequence.length}
+            </div>
+          </div>
+          <Progress value={(currentIndex / testSequence.length) * 100} className="h-2" />
+        </Card>
+
+        {isTestActive && (
+          <Card className="p-6 text-center">
+            {cooldownUntil && Date.now() < cooldownUntil ? (
+              <div className="text-lg text-muted-foreground">Get ready for the next key...</div>
+            ) : (
+              <div>
+                <div className="text-lg text-muted-foreground mb-2">Press and hold this key:</div>
+                <div className="flex justify-center">
+                  <KeyboardKey
+                    keyChar={testSequence[currentIndex]?.key}
+                    targetPressure={testSequence[currentIndex]?.targetPressure}
+                    currentPressure={getCurrentKeyPress(testSequence[currentIndex]?.keyCode)?.analogValue || 0}
+                    isPressed={getCurrentKeyPress(testSequence[currentIndex]?.keyCode)?.isPressed === 1}
+                    isTarget={true}
+                    className="w-20 h-20 text-3xl"
+                  />
+                </div>
+              </div>
+            )}
           </Card>
         )}
 
-        {/* Keyboard Layout */}
-        <Card className="p-6 bg-keyboard-bg">
-          <h3 className="text-lg font-semibold mb-4">Home Row Keys</h3>
-          <div className="flex justify-center gap-2">
-            {HOME_ROW_KEYS.map((key) => {
-              const keyPress = getCurrentKeyPress(key.keyCode);
-              const currentTarget = isCurrentTarget(key.keyCode) ? testSequence[currentIndex] : undefined;
-              
-              return (
-                <KeyboardKey
-                  key={key.key}
-                  keyChar={key.key}
-                  targetPressure={currentTarget?.targetPressure}
-                  currentPressure={keyPress?.analogValue || 0}
-                  isPressed={keyPress?.isPressed === 1}
-                  isTarget={!!currentTarget}
-                />
-              );
-            })}
-          </div>
-        </Card>
-
-        {/* Real-time Key Data */}
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Real-time Key Data</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-40 overflow-y-auto">
-            {keyData.filter(k => k.isPressed === 1).map((key, index) => (
-              <div key={index} className="bg-secondary p-2 rounded text-sm font-mono">
-                Key {key.keyCode}: {Math.round(key.analogValue * 100)}%
+        <Card className="p-4 mt-4">
+          <h3 className="text-lg font-medium mb-2">Real-time Key Data</h3>
+          {keyData.length === 0 ? (
+            <div className="text-muted-foreground text-sm">No keys currently pressed</div>
+          ) : (
+            keyData.map(k => (
+              <div key={k.keyCode} className="text-sm">
+                Key {k.keyCode}: {Math.round(k.analogValue * 100)}%
               </div>
-            ))}
-            {keyData.filter(k => k.isPressed === 1).length === 0 && (
-              <div className="text-muted-foreground text-sm col-span-full text-center py-4">
-                No keys currently pressed
-              </div>
-            )}
-          </div>
+            ))
+          )}
         </Card>
       </div>
     </div>
