@@ -45,9 +45,7 @@ function update(message) {
         // split key into seperate values
         var keydata = element.split(':');
         // e.g. keydata = [26, 0.055, 0] = [key, pressure, state]
-
-        // INSERT INTO THIS SECTION WITH YOUR KEY OBJECTS TO CUSTOMISE
-    })
+    });
 }
 
 // reset keys to unpressed state if screen should be cleared upon all keys released

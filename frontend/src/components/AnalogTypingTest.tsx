@@ -30,17 +30,23 @@ const HOME_ROW_KEYS = [
   { key: 'l', keyCode: 15 },
 ];
 
-const PRESSURE_LEVELS = [30, 60, 100];
+const PRESSURE_LEVELS_MAP: Record<number, number[]> = {
+  2: [50, 100],
+  3: [30, 60, 100],
+};
 
 export const AnalogTypingTest = () => {
   const { keyData, connectionStatus, connect, disconnect } = useWebSocket();
   const { toast } = useToast();
 
+  const [levelCount, setLevelCount] = useState<number>(3);
+
   const [testSequence, setTestSequence] = useState<TestSequence[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isTestActive, setIsTestActive] = useState(false);
-  const [holdStartTime, setHoldStartTime] = useState<number | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [maxAnalog, setMaxAnalog] = useState<number>(0);
+  const [keyHeld, setKeyHeld] = useState<boolean>(false);
 
   const [testStats, setTestStats] = useState<TestStats>({
     accuracy: 0,
@@ -51,9 +57,10 @@ export const AnalogTypingTest = () => {
 
   const generateTestSequence = useCallback(() => {
     const sequence: TestSequence[] = [];
+    const levels = PRESSURE_LEVELS_MAP[levelCount] || [30, 60, 100];
     for (let i = 0; i < 20; i++) {
       const randomKey = HOME_ROW_KEYS[Math.floor(Math.random() * HOME_ROW_KEYS.length)];
-      const randomPressure = PRESSURE_LEVELS[Math.floor(Math.random() * PRESSURE_LEVELS.length)];
+      const randomPressure = levels[Math.floor(Math.random() * levels.length)];
       sequence.push({
         key: randomKey.key,
         keyCode: randomKey.keyCode,
@@ -62,7 +69,7 @@ export const AnalogTypingTest = () => {
     }
     setTestSequence(sequence);
     setCurrentIndex(0);
-  }, []);
+  }, [levelCount]);
 
   useEffect(() => {
     generateTestSequence();
@@ -70,71 +77,51 @@ export const AnalogTypingTest = () => {
 
   useEffect(() => {
     if (!isTestActive || currentIndex >= testSequence.length) return;
-
     if (cooldownUntil && Date.now() < cooldownUntil) return;
 
     const currentTarget = testSequence[currentIndex];
-    const correctKeyPress = keyData.find(k => k.keyCode === currentTarget.keyCode && k.isPressed === 1);
-    const wrongKeyPress = keyData.find(k => k.keyCode !== currentTarget.keyCode && k.isPressed === 1);
+    const keyEvent = keyData.find(k => k.keyCode === currentTarget.keyCode);
+    const otherPressed = keyData.find(k => k.keyCode !== currentTarget.keyCode && k.isPressed);
 
-    const tolerance = 10;
-
-    if (wrongKeyPress) {
-      handleAttempt(100, false, "Wrong key!");
+    if (otherPressed) {
+      handleAttempt(100, false, 'Wrong key!');
       return;
     }
 
-    if (correctKeyPress) {
-      const pressurePercent = correctKeyPress.analogValue * 100;
-      const deviation = Math.abs(pressurePercent - currentTarget.targetPressure);
-
-      const withinRange = deviation <= tolerance;
-      const now = Date.now();
-
-      if (withinRange) {
-        if (!holdStartTime) {
-          setHoldStartTime(now);
-        } else if (now - holdStartTime >= 750) { // give more time here
-          handleAttempt(deviation, true, "Perfect!");
-        }
-      } else {
-        if (!holdStartTime) {
-          setHoldStartTime(now);
-        } else if (now - holdStartTime >= 750) {
-          handleAttempt(deviation, false, "Wrong pressure!");
-        }
-      }
-    } else {
-      setHoldStartTime(null);
+    if (keyEvent?.isPressed) {
+      setKeyHeld(true);
+      setMaxAnalog(prev => Math.max(prev, keyEvent.analogValue));
+    } else if (keyHeld) {
+      const percent = maxAnalog * 100;
+      const deviation = Math.abs(percent - currentTarget.targetPressure);
+      const success = deviation <= 10;
+      handleAttempt(deviation, success, success ? 'Good!' : 'Missed target');
+      setKeyHeld(false);
+      setMaxAnalog(0);
     }
-  }, [keyData, isTestActive, currentIndex, testSequence, holdStartTime, cooldownUntil]);
+  }, [keyData, isTestActive, currentIndex, testSequence, cooldownUntil, maxAnalog, keyHeld]);
 
   const handleAttempt = (deviation: number, isSuccess: boolean, message: string) => {
     setTestStats(prev => {
-      const newTotalAttempts = prev.totalAttempts + 1;
-      const newSuccessfulHits = prev.successfulHits + (isSuccess ? 1 : 0);
-      const newAccuracy = (newSuccessfulHits / newTotalAttempts) * 100;
-      const newAverageDeviation = (prev.averageDeviation * prev.totalAttempts + deviation) / newTotalAttempts;
-
+      const newTotal = prev.totalAttempts + 1;
+      const newHits = prev.successfulHits + (isSuccess ? 1 : 0);
+      const accuracy = (newHits / newTotal) * 100;
+      const avgDev = (prev.averageDeviation * prev.totalAttempts + deviation) / newTotal;
       return {
-        accuracy: newAccuracy,
-        totalAttempts: newTotalAttempts,
-        successfulHits: newSuccessfulHits,
-        averageDeviation: newAverageDeviation
+        accuracy,
+        totalAttempts: newTotal,
+        successfulHits: newHits,
+        averageDeviation: avgDev
       };
     });
 
     toast({
       title: message,
-      description: isSuccess
-        ? `Held correct pressure`
-        : `Deviation: ${Math.round(deviation)}%`,
-      variant: isSuccess ? undefined : "destructive"
+      description: isSuccess ? 'Held correct pressure' : `Deviation: ${Math.round(deviation)}%`,
+      variant: isSuccess ? undefined : 'destructive'
     });
 
-    setHoldStartTime(null);
     setCooldownUntil(Date.now() + 3000);
-
     setTimeout(() => {
       setCurrentIndex(prev => prev + 1);
       setCooldownUntil(null);
@@ -145,7 +132,7 @@ export const AnalogTypingTest = () => {
     if (currentIndex >= testSequence.length && isTestActive) {
       setIsTestActive(false);
       toast({
-        title: "Test Complete!",
+        title: 'Test Complete!',
         description: `Final accuracy: ${Math.round(testStats.accuracy)}%`,
       });
     }
@@ -154,30 +141,21 @@ export const AnalogTypingTest = () => {
   const startTest = () => {
     if (connectionStatus !== 'connected') {
       connect();
-      toast({
-        title: "Connecting...",
-        description: "Please wait while we connect to your Wooting keyboard",
-      });
+      toast({ title: 'Connecting...', description: 'Please wait while we connect to your Wooting keyboard' });
       return;
     }
     setIsTestActive(true);
   };
 
-  const pauseTest = () => {
-    setIsTestActive(false);
-  };
+  const pauseTest = () => setIsTestActive(false);
 
   const resetTest = () => {
     setIsTestActive(false);
     setCurrentIndex(0);
-    setTestStats({
-      accuracy: 0,
-      totalAttempts: 0,
-      successfulHits: 0,
-      averageDeviation: 0
-    });
-    setHoldStartTime(null);
+    setTestStats({ accuracy: 0, totalAttempts: 0, successfulHits: 0, averageDeviation: 0 });
     setCooldownUntil(null);
+    setMaxAnalog(0);
+    setKeyHeld(false);
     generateTestSequence();
   };
 
@@ -187,12 +165,9 @@ export const AnalogTypingTest = () => {
 
   const getConnectionIcon = () => {
     switch (connectionStatus) {
-      case 'connected':
-        return <Wifi className="w-4 h-4 text-success" />;
-      case 'connecting':
-        return <Wifi className="w-4 h-4 text-warning animate-pulse" />;
-      default:
-        return <WifiOff className="w-4 h-4 text-destructive" />;
+      case 'connected': return <Wifi className="w-4 h-4 text-success" />;
+      case 'connecting': return <Wifi className="w-4 h-4 text-warning animate-pulse" />;
+      default: return <WifiOff className="w-4 h-4 text-destructive" />;
     }
   };
 
@@ -230,6 +205,24 @@ export const AnalogTypingTest = () => {
             </div>
           </div>
         </Card>
+
+        <div className="flex justify-center">
+          <div className="space-y-2">
+            <div className="text-sm text-muted-foreground">Select pressure thresholds:</div>
+            <div className="flex gap-2">
+              {[2, 3].map((count) => (
+                <Button
+                  key={count}
+                  variant={count === levelCount ? 'default' : 'outline'}
+                  onClick={() => setLevelCount(count)}
+                  size="sm"
+                >
+                  {count} Levels
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card className="p-4 text-center">
